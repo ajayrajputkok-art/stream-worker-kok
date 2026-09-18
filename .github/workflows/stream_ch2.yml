@@ -1,0 +1,52 @@
+name: Stream CH2 to YouTube RTMP
+
+on:
+  workflow_dispatch:
+    inputs:
+      stream_duration_mins:
+        description: 'Stream duration in minutes'
+        required: false
+        default: '42'
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install System FFmpeg
+        run: sudo apt-get update -y && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Download Latest CH2 Video from Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download latest-ch2 -p "kalyan_master_video_ch2.mov" --output stream_video_ch2.mov --clobber
+
+      - name: Verify Video
+        run: |
+          ffprobe -v error \
+            -show_entries format=duration,size,bit_rate \
+            -show_entries stream=codec_name,codec_type,width,height,bit_rate \
+            stream_video_ch2.mov
+
+      - name: Stream to YouTube RTMP
+        env:
+          STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY_CH2 }}
+        run: |
+          if [ -z "$STREAM_KEY" ]; then
+            echo "::error::Secret YOUTUBE_STREAM_KEY_CH2 is not set!"
+            exit 1
+          fi
+
+          DURATION=$((2400 + RANDOM % 121))
+          echo "Streaming for ${DURATION}s (~$(( DURATION / 60 ))m)..."
+
+          ffmpeg -re -stream_loop -1 -fflags +genpts -i stream_video_ch2.mov \
+            -t "$DURATION" \
+            -c:v copy \
+            -c:a aac -b:a 320k -ar 48000 \
+            -flvflags no_duration_filesize \
+            -f flv \
+            "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY"
