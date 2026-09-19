@@ -18,11 +18,15 @@ jobs:
       - name: Install System FFmpeg
         run: sudo apt-get update -y && sudo apt-get install -y --no-install-recommends ffmpeg
 
-      - name: Download Latest CH2 Video from Release
+      - name: Download Latest CH2 Video from Private Release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
         run: |
-          gh release download latest-ch2 -p "kalyan_master_video_ch2.mov" --output stream_video_ch2.mov --clobber
+          gh release download latest-ch2 \
+            --repo ajayrajputkok-art/KOKStream \
+            -p "kalyan_master_video_ch2.mov" \
+            --output stream_video_ch2.mov \
+            --clobber
 
       - name: Verify Video
         run: |
