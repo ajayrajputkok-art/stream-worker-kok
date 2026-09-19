@@ -1,0 +1,29 @@
+name: Stream Rajput to YouTube RTMP
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg curl
+
+      - name: Download Latest Master from Private Release
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        run: |
+          SLUG="${{ secrets.CORE_REPO_SLUG }}"
+          if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
+          gh release download latest-ch2 --repo "$SLUG" --pattern "*.mov" --clobber
+          mv *.mov input.mov
+
+      - name: Push Stream to YouTube
+        env:
+          STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
+        run: |
+          ffmpeg -re -stream_loop -1 -i input.mov \
+            -c:v libx264 -preset veryfast -b:v 4500k -maxrate 5000k -bufsize 10000k -pix_fmt yuv420p -g 60 \
+            -c:a aac -b:a 128k -ar 44100 \
+            -f flv "rtmp://a.rtmp.youtube.com/live2/${STREAM_KEY}"
