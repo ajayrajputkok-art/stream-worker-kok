@@ -3,57 +3,68 @@ name: Stream Rajput to YouTube RTMP
 on:
   workflow_dispatch:
     inputs:
-      stream_duration_mins:
-        description: 'Stream duration in minutes'
-        required: false
-        default: '42'
+      stream_mode:
+        description: 'Streaming Mode (timed / continuous)'
+        required: true
+        default: 'timed'
+
+concurrency:
+  group: stream-rajput-active
+  cancel-in-progress: true
 
 jobs:
   stream:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Install System FFmpeg
+        run: sudo apt-get update -y && sudo apt-get install -y --no-install-recommends ffmpeg curl
 
-      - name: Install FFmpeg
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-
-      - name: Download Master Video from Private Release
+      - name: Download Latest Master Video from Private Release
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
         run: |
           SLUG="${{ secrets.CORE_REPO_SLUG }}"
-          if [ -z "$SLUG" ]; then
-            SLUG="ajayrajputkok-art/KOKStream"
-          fi
-          echo "Fetching latest release video from $SLUG..."
-          gh release download latest-ch2 --repo "$SLUG" --pattern "*.mov" --clobber
-          
-          # Rename whatever .mov was downloaded to master.mov
-          MOV_FILE=$(ls *.mov | head -n 1)
-          if [ -z "$MOV_FILE" ]; then
-            echo "Error: No .mov asset found in release!"
-            exit 1
-          fi
-          mv "$MOV_FILE" master.mov
-          ls -lh master.mov
+          if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
+          echo "Downloading latest Rajput video from $SLUG..."
+          gh release download latest --repo "$SLUG" -p "kalyan_master_video.mov" --output stream_video.mov --clobber
+
+      - name: Verify Video
+        run: |
+          ls -lh stream_video.mov
+          ffprobe -v error -show_entries format=duration,bit_rate -show_entries stream=codec_name,width,height stream_video.mov
 
       - name: Stream to YouTube RTMP
         env:
           STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
-          DURATION_MINS: ${{ github.event.inputs.stream_duration_mins }}
+          STREAM_MODE: ${{ github.event.inputs.stream_mode }}
         run: |
           if [ -z "$STREAM_KEY" ]; then
-            echo "Error: YOUTUBE_STREAM_KEY secret is not set!"
+            echo "::error::Secret YOUTUBE_STREAM_KEY is not set!"
             exit 1
           fi
 
-          echo "Starting RTMP stream for ${DURATION_MINS} minutes..."
-          
-          ffmpeg -re -stream_loop -1 -i master.mov \
-            -t $((DURATION_MINS * 60)) \
+          if [ "$STREAM_MODE" = "continuous" ]; then
+            DURATION=20700
+            echo "Mode: CONTINUOUS (Chunk: ${DURATION}s / ~345 mins)..."
+          else
+            DURATION=$((2400 + RANDOM % 121))
+            echo "Mode: TIMED (${DURATION}s / ~$(( DURATION / 60 )) mins)..."
+          fi
+
+          ffmpeg -re -stream_loop -1 -fflags +genpts -i stream_video.mov \
+            -t "$DURATION" \
             -c:v copy \
-            -c:a aac -b:a 128k -ar 44100 \
-            -f flv "rtmp://a.rtmp.youtube.com/live2/${STREAM_KEY}"
+            -c:a aac -b:a 320k -ar 48000 \
+            -flvflags no_duration_filesize \
+            -f flv \
+            "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY"
+
+      - name: Trigger Next Relay Runner (Continuous Mode Only)
+        if: success() && github.event.inputs.stream_mode == 'continuous'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Relaying next runner to maintain continuous uptime..."
+          gh workflow run stream_rajput.yml -f stream_mode=continuous
