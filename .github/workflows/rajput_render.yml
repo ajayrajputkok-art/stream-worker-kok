@@ -5,15 +5,19 @@ on:
     inputs:
       action_mode:
         description: 'Action execution mode'
-        required: false
+        required: true
         default: 'Full Render & Stream'
+        type: choice
+        options:
+          - 'Full Render & Stream'
+          - 'Dry Run (Inspect Patterns Only)'
       current_week:
         description: 'Current week jodis'
         required: true
         default: '00,58'
       trick_1_id:
         description: 'Match ID for Trick 1'
-        required: true
+        required: false
         default: '0'
       trick_2_id:
         description: 'Match ID for Trick 2'
@@ -78,15 +82,25 @@ jobs:
 
       - name: Run Rajput Video Engine
         run: |
-          python rajput_render.py \
-            --current-week "${{ github.event.inputs.current_week }}" \
-            --t1 "${{ github.event.inputs.trick_1_id }}" \
-            --t2 "${{ github.event.inputs.trick_2_id }}" \
-            --quality "${{ github.event.inputs.quality }}" \
-            --pace "${{ github.event.inputs.pace }}" \
-            --num-weeks "${{ github.event.inputs.num_weeks }}"
+          if [ "${{ github.event.inputs.action_mode }}" = "Dry Run (Inspect Patterns Only)" ]; then
+            echo "Running Dry-Run to inspect pattern matches..."
+            python rajput_render.py \
+              --current-week "${{ github.event.inputs.current_week }}" \
+              --num-weeks "${{ github.event.inputs.num_weeks }}" \
+              --dry-run
+          else
+            echo "Running Full Video Generation..."
+            python rajput_render.py \
+              --current-week "${{ github.event.inputs.current_week }}" \
+              --t1 "${{ github.event.inputs.trick_1_id }}" \
+              --t2 "${{ github.event.inputs.trick_2_id }}" \
+              --quality "${{ github.event.inputs.quality }}" \
+              --pace "${{ github.event.inputs.pace }}" \
+              --num-weeks "${{ github.event.inputs.num_weeks }}"
+          fi
 
       - name: Remux Broadcast Master MOV (12Mbps CBR + PCM Audio)
+        if: github.event.inputs.action_mode != 'Dry Run (Inspect Patterns Only)'
         run: |
           if [ -f "output/kalyan_master_video.mp4" ]; then
             ffmpeg -y -i output/kalyan_master_video.mp4 \
@@ -100,6 +114,7 @@ jobs:
           fi
 
       - name: Publish Video to Private Repo Releases
+        if: github.event.inputs.action_mode != 'Dry Run (Inspect Patterns Only)'
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
         run: |
