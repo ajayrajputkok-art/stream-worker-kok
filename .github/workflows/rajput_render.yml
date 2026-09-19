@@ -1,4 +1,3 @@
-Here is the complete updated code for .github/workflows/rajput_render.yml with the fixed empty default, allowing Monday targets to render properly when left blank:
 name: Render and Release Rajput Video
 
 on:
@@ -124,4 +123,3 @@ jobs:
           SLUG="${{ secrets.CORE_REPO_SLUG }}"
           if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
           gh release upload latest output/kalyan_master_video.mov --repo "$SLUG" --clobber
-
