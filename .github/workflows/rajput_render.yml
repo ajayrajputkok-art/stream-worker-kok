@@ -1,0 +1,107 @@
+name: Render and Release Rajput Video
+
+on:
+  workflow_dispatch:
+    inputs:
+      action_mode:
+        description: 'Action execution mode'
+        required: false
+        default: 'Full Render & Stream'
+      current_week:
+        description: 'Current week jodis'
+        required: true
+        default: '00,58'
+      trick_1_id:
+        description: 'Match ID for Trick 1'
+        required: true
+        default: '0'
+      trick_2_id:
+        description: 'Match ID for Trick 2'
+        required: false
+        default: ''
+      quality:
+        description: 'Render quality'
+        required: true
+        default: '4K'
+        type: choice
+        options:
+          - LOW
+          - 4K
+      pace:
+        description: 'Pace multiplier'
+        required: true
+        default: '1.45'
+      num_weeks:
+        description: 'Number of recent weeks'
+        required: false
+        default: '6'
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out public repo
+        uses: actions/checkout@v4
+
+      - name: Fetch Rajput Code & Assets from Private Core
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        run: |
+          SLUG="${{ secrets.CORE_REPO_SLUG }}"
+          if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
+          echo "Cloning core scripts and assets from $SLUG..."
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${SLUG}.git" temp_core
+          
+          # Copy render script, data file, and audio assets
+          cp temp_core/rajput_render.py ./ || true
+          cp temp_core/*Kalyan*.xlsx ./ || true
+          cp temp_core/bg_music*.mp3 ./ || true
+          cp temp_core/sfx_draw*.mp3 ./ || true
+          cp temp_core/audio_cta*.mp3 ./ || true
+          rm -rf temp_core
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Core Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pandas openpyxl numpy requests manim edge-tts
+
+      - name: Install System Dependencies & Fonts
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg libpango1.0-dev libcairo2-dev pkg-config fonts-noto-core fonts-indic
+
+      - name: Run Rajput Video Engine
+        run: |
+          python rajput_render.py \
+            --current-week "${{ github.event.inputs.current_week }}" \
+            --t1 "${{ github.event.inputs.trick_1_id }}" \
+            --t2 "${{ github.event.inputs.trick_2_id }}" \
+            --quality "${{ github.event.inputs.quality }}" \
+            --pace "${{ github.event.inputs.pace }}" \
+            --num-weeks "${{ github.event.inputs.num_weeks }}"
+
+      - name: Remux Broadcast Master MOV (12Mbps CBR + PCM Audio)
+        run: |
+          if [ -f "output/kalyan_master_video.mp4" ]; then
+            ffmpeg -y -i output/kalyan_master_video.mp4 \
+              -c:v libx264 -preset fast -profile:v main \
+              -b:v 12000k -minrate 12000k -maxrate 12000k -bufsize 12000k \
+              -x264-params "nal-hrd=cbr:force-cfr=1" \
+              -bf 1 -pix_fmt yuv420p \
+              -c:a pcm_s24le -ar 48000 \
+              -timecode "01:00:00:00" \
+              output/kalyan_master_video.mov
+          fi
+
+      - name: Publish Video to Private Repo Releases
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        run: |
+          SLUG="${{ secrets.CORE_REPO_SLUG }}"
+          if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
+          gh release upload latest output/kalyan_master_video.mov --repo "$SLUG" --clobber
