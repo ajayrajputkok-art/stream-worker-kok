@@ -2,28 +2,58 @@ name: Stream Rajput to YouTube RTMP
 
 on:
   workflow_dispatch:
+    inputs:
+      stream_duration_mins:
+        description: 'Stream duration in minutes'
+        required: false
+        default: '42'
 
 jobs:
   stream:
     runs-on: ubuntu-latest
     steps:
-      - name: Install FFmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg curl
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Download Latest Master from Private Release
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Download Master Video from Private Release
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
         run: |
           SLUG="${{ secrets.CORE_REPO_SLUG }}"
-          if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
+          if [ -z "$SLUG" ]; then
+            SLUG="ajayrajputkok-art/KOKStream"
+          fi
+          echo "Fetching latest release video from $SLUG..."
           gh release download latest-ch2 --repo "$SLUG" --pattern "*.mov" --clobber
-          mv *.mov input.mov
+          
+          # Rename whatever .mov was downloaded to master.mov
+          MOV_FILE=$(ls *.mov | head -n 1)
+          if [ -z "$MOV_FILE" ]; then
+            echo "Error: No .mov asset found in release!"
+            exit 1
+          fi
+          mv "$MOV_FILE" master.mov
+          ls -lh master.mov
 
-      - name: Push Stream to YouTube
+      - name: Stream to YouTube RTMP
         env:
           STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
+          DURATION_MINS: ${{ github.event.inputs.stream_duration_mins }}
         run: |
-          ffmpeg -re -stream_loop -1 -i input.mov \
-            -c:v libx264 -preset veryfast -b:v 4500k -maxrate 5000k -bufsize 10000k -pix_fmt yuv420p -g 60 \
+          if [ -z "$STREAM_KEY" ]; then
+            echo "Error: YOUTUBE_STREAM_KEY secret is not set!"
+            exit 1
+          fi
+
+          echo "Starting RTMP stream for ${DURATION_MINS} minutes..."
+          
+          ffmpeg -re -stream_loop -1 -i master.mov \
+            -t $((DURATION_MINS * 60)) \
+            -c:v copy \
             -c:a aac -b:a 128k -ar 44100 \
             -f flv "rtmp://a.rtmp.youtube.com/live2/${STREAM_KEY}"
