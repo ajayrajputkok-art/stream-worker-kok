@@ -1,3 +1,4 @@
+Here is the complete updated code for .github/workflows/rajput_render.yml with the fixed empty default, allowing Monday targets to render properly when left blank:
 name: Render and Release Rajput Video
 
 on:
@@ -12,9 +13,9 @@ on:
           - 'Full Render & Stream'
           - 'Dry Run (Inspect Patterns Only)'
       current_week:
-        description: 'Current week jodis'
-        required: true
-        default: '00,58'
+        description: 'Current week jodis (leave empty for Monday)'
+        required: false
+        default: ''
       trick_1_id:
         description: 'Match ID for Trick 1'
         required: false
@@ -82,16 +83,18 @@ jobs:
 
       - name: Run Rajput Video Engine
         run: |
+          CURRENT_WEEK_ARG="${{ github.event.inputs.current_week }}"
+          
           if [ "${{ github.event.inputs.action_mode }}" = "Dry Run (Inspect Patterns Only)" ]; then
             echo "Running Dry-Run to inspect pattern matches..."
             python rajput_render.py \
-              --current-week "${{ github.event.inputs.current_week }}" \
+              --current-week "$CURRENT_WEEK_ARG" \
               --num-weeks "${{ github.event.inputs.num_weeks }}" \
               --dry-run
           else
             echo "Running Full Video Generation..."
             python rajput_render.py \
-              --current-week "${{ github.event.inputs.current_week }}" \
+              --current-week "$CURRENT_WEEK_ARG" \
               --t1 "${{ github.event.inputs.trick_1_id }}" \
               --t2 "${{ github.event.inputs.trick_2_id }}" \
               --quality "${{ github.event.inputs.quality }}" \
@@ -121,3 +124,4 @@ jobs:
           SLUG="${{ secrets.CORE_REPO_SLUG }}"
           if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
           gh release upload latest output/kalyan_master_video.mov --repo "$SLUG" --clobber
+
