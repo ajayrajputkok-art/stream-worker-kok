@@ -43,6 +43,16 @@ jobs:
       - name: Check out public repo
         uses: actions/checkout@v4
 
+      - name: Install System Dependencies & Fonts
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg libpango1.0-dev libcairo2-dev pkg-config fonts-noto-core fonts-indic
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Fetch Rajput Code & Assets from Private Core
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
@@ -60,20 +70,11 @@ jobs:
           cp temp_core/audio_cta*.mp3 ./ || true
           rm -rf temp_core
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Core Dependencies
+      - name: Install Python Dependencies
         run: |
           pip install --upgrade pip
-          pip install pandas openpyxl numpy requests manim edge-tts
-
-      - name: Install System Dependencies & Fonts
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y ffmpeg libpango1.0-dev libcairo2-dev pkg-config fonts-noto-core fonts-indic
+          pip install pandas openpyxl numpy requests
+          pip install manim edge-tts
 
       - name: Run Rajput Video Engine
         run: |
