@@ -79,12 +79,13 @@ jobs:
             -timecode "01:00:00:00" \
             output/kalyan_master_video_ch2.mov
 
-      - name: Publish CH2 Video to Release
-        uses: softprops/action-gh-release@v2
-        if: success()
-        with:
-          tag_name: latest-ch2
-          name: Latest CH2 Stream Video
-          files: output/kalyan_master_video_ch2.mov
+      - name: Publish Master MOV to Private Repo Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        run: |
+          gh release upload latest-ch2 output/kalyan_master_video_ch2.mov \
+            --repo ajayrajputkok-art/KOKStream \
+            --clobber || \
+          gh release create latest-ch2 output/kalyan_master_video_ch2.mov \
+            --repo ajayrajputkok-art/KOKStream \
+            --title "Latest CH2 Stream Video"
