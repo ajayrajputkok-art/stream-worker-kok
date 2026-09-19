@@ -16,6 +16,9 @@ jobs:
   stream:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    permissions:
+      actions: write
+      contents: read
 
     steps:
       - name: Install System FFmpeg
