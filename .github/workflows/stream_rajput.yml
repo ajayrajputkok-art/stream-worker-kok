@@ -6,7 +6,7 @@ on:
       stream_mode:
         description: 'Choose Streaming Duration'
         required: true
-        default: 'manual_stop'
+        default: 'Until Manually Stopped (Continuous Loop)'
         type: choice
         options:
           - 'Until Manually Stopped (Continuous Loop)'
@@ -14,7 +14,7 @@ on:
 
 concurrency:
   group: stream-rajput-active
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   stream:
@@ -37,7 +37,7 @@ jobs:
           echo "Downloading latest Rajput video from $SLUG..."
           gh release download latest --repo "$SLUG" -p "kalyan_master_video.mov" --output stream_video.mov --clobber
 
-      - name: Stream to YouTube RTMP
+      - name: Stream Indefinitely to YouTube RTMP
         env:
           STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
           MODE: ${{ github.event.inputs.stream_mode }}
@@ -48,11 +48,11 @@ jobs:
           fi
 
           if [[ "$MODE" == *"Until Manually Stopped"* ]]; then
-            # 5 hours 45 mins chunk before clean relay handoff
-            DURATION=20700
-            echo "Mode: MANUAL STOP (Continuous Loop, 5.75h runner chunk)..."
+            # Run in 5 hour 30 minute chunks (19800s) to guarantee safety margin before 6h hard runner cutoff
+            DURATION=19800
+            echo "Mode: MANUAL STOP (Continuous Loop, 5.5h runner chunk)..."
           else
-            # ~40-42 minutes randomized single stream
+            # ~40-42 minutes single broadcast
             DURATION=$((2400 + RANDOM % 121))
             echo "Mode: TIMED (${DURATION}s / ~$(( DURATION / 60 )) mins)..."
           fi
@@ -60,15 +60,15 @@ jobs:
           ffmpeg -re -stream_loop -1 -fflags +genpts -i stream_video.mov \
             -t "$DURATION" \
             -c:v copy \
-            -c:a aac -b:a 320k -ar 48000 \
+            -c:a copy \
             -flvflags no_duration_filesize \
             -f flv \
             "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY"
 
       - name: Trigger Next Relay Runner (Manual Stop Mode Only)
-        if: success() && contains(github.event.inputs.stream_mode, 'Until Manually Stopped')
+        if: always() && contains(github.event.inputs.stream_mode, 'Until Manually Stopped')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Triggering next relay runner to maintain continuous uptime..."
+          echo "Triggering next relay runner to maintain 24/7 continuous stream..."
           gh workflow run stream_rajput.yml -f "stream_mode=Until Manually Stopped (Continuous Loop)"
