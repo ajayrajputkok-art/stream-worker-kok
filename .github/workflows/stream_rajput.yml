@@ -48,7 +48,7 @@ jobs:
           fi
 
           if [[ "$MODE" == *"Until Manually Stopped"* ]]; then
-            # Run in 5 hour 30 minute chunks (19800s) to guarantee safety margin before 6h hard runner cutoff
+            # 5 hours 30 minutes (19800s) runner chunk for safe relay before 6h timeout
             DURATION=19800
             echo "Mode: MANUAL STOP (Continuous Loop, 5.5h runner chunk)..."
           else
@@ -60,7 +60,7 @@ jobs:
           ffmpeg -re -stream_loop -1 -fflags +genpts -i stream_video.mov \
             -t "$DURATION" \
             -c:v copy \
-            -c:a copy \
+            -c:a aac -b:a 192k -ar 48000 \
             -flvflags no_duration_filesize \
             -f flv \
             "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY"
