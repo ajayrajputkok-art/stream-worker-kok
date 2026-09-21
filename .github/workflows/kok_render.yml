@@ -39,53 +39,81 @@ on:
 jobs:
   render:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     permissions:
       contents: write
+
     steps:
       - name: Fetch Private Engine Code
         run: |
           git clone https://${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/ajayrajputkok-art/KOKStream.git .
 
-      - name: Set up Python
+      - name: Set up Python Environment
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Install Core Dependencies
-        run: |
-          pip install --upgrade pip
-          pip install pandas openpyxl numpy requests
+          cache: 'pip'
 
       - name: Install System Dependencies & Hindi Fonts
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y ffmpeg libpango1.0-dev libcairo2-dev pkg-config fonts-noto-core fonts-indic
+          sudo apt-get install -y --no-install-recommends \
+            ffmpeg \
+            libpango1.0-dev \
+            libcairo2-dev \
+            pkg-config \
+            fonts-noto-core \
+            fonts-indic
 
-      - name: Install Video Dependencies
+      - name: Install Python Dependencies
         run: |
-          pip install manim edge-tts
+          python -m pip install --upgrade pip
+          pip install pandas openpyxl numpy requests manim edge-tts
 
       - name: Run CH2 Video Engine
-        run: python kok_render.py --current-week "${{ github.event.inputs.current_week }}" --t1 "${{ github.event.inputs.trick_1_id }}" --t2 "${{ github.event.inputs.trick_2_id }}" --quality "${{ github.event.inputs.quality }}" --pace "${{ github.event.inputs.pace }}" --num-weeks "${{ github.event.inputs.num_weeks }}"
-
-      - name: Remux Broadcast Master MOV (12Mbps CBR + PCM Audio)
         run: |
-          ffmpeg -y -i output/ch2_master_video.mp4 \
-            -c:v libx264 -preset fast -profile:v main \
-            -b:v 12000k -minrate 12000k -maxrate 12000k -bufsize 12000k \
-            -x264-params "nal-hrd=cbr:force-cfr=1" \
-            -bf 1 -pix_fmt yuv420p \
-            -c:a pcm_s24le -ar 48000 \
-            -timecode "01:00:00:00" \
-            output/kalyan_master_video_ch2.mov
+          python kok_render.py \
+            --current-week "${{ github.event.inputs.current_week }}" \
+            --t1 "${{ github.event.inputs.trick_1_id }}" \
+            --t2 "${{ github.event.inputs.trick_2_id }}" \
+            --quality "${{ github.event.inputs.quality }}" \
+            --pace "${{ github.event.inputs.pace }}" \
+            --num-weeks "${{ github.event.inputs.num_weeks }}"
+
+      - name: Remux Broadcast Master MOV (12Mbps Heavy CBR + Studio Flag Delay)
+        run: |
+          mkdir -p output
+          SRC_FILE=$(find . -maxdepth 3 -type f -name "ch2_master_video.mp4" -o -name "*master*.mp4" | head -n 1)
+          
+          if [ -z "$SRC_FILE" ]; then
+            SRC_FILE="output/ch2_master_video.mp4"
+          fi
+
+          if [ -f "$SRC_FILE" ]; then
+            # Strict 12 Mbps CBR container with deep timecode tracks
+            # Uses AAC audio so RTMP ingest succeeds, but leaves VOD processing delayed
+            ffmpeg -y -i "$SRC_FILE" \
+              -c:v libx264 -preset fast -profile:v main \
+              -b:v 12000k -minrate 12000k -maxrate 12000k -bufsize 12000k \
+              -x264-params "nal-hrd=cbr:force-cfr=1" \
+              -bf 1 -pix_fmt yuv420p \
+              -c:a aac -b:a 320k -ar 48000 \
+              -timecode "01:00:00:00" \
+              output/kalyan_master_video_ch2.mov
+          else
+            echo "::error::Rendered source MP4 not found!"
+            exit 1
+          fi
 
       - name: Publish Master MOV to Private Repo Release
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
         run: |
-          gh release upload latest-ch2 output/kalyan_master_video_ch2.mov \
-            --repo ajayrajputkok-art/KOKStream \
-            --clobber || \
+          gh release delete latest-ch2 --repo ajayrajputkok-art/KOKStream --yes || true
+          git tag -d latest-ch2 || true
+          git push https://${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/ajayrajputkok-art/KOKStream.git :refs/tags/latest-ch2 || true
+
           gh release create latest-ch2 output/kalyan_master_video_ch2.mov \
             --repo ajayrajputkok-art/KOKStream \
-            --title "Latest CH2 Stream Video"
+            --title "Latest CH2 Stream Video" \
+            --notes "Heavy CBR master build for CH2 live broadcast"
