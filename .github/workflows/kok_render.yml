@@ -1,380 +1,134 @@
-import os
-import re
-import sys
-import glob
-import argparse
-import numpy as np
-import pandas as pd
-from manim import *
+name: Render and Release CH2 Video
 
-# ==============================================================================
-# CONFIGURATION & CONSTANTS
-# ==============================================================================
-WEEKDAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT"]
-HOLIDAY_MARKERS = {"✪", "**", "9*", "✱", "?", "*", "NA", "NAN"}
-CUT_MAPPING = {0: 5, 1: 6, 2: 7, 3: 8, 4: 9, 5: 0, 6: 1, 7: 2, 8: 3, 9: 4}
+on:
+  workflow_dispatch:
+    inputs:
+      action_mode:
+        description: 'Action execution mode'
+        required: true
+        default: 'Full Render & Stream'
+        type: choice
+        options:
+          - 'Full Render & Stream'
+          - 'Dry Run (Inspect Patterns Only)'
+      current_week:
+        description: 'Current week jodis (leave empty for Monday)'
+        required: false
+        default: ''
+      trick_1_id:
+        description: 'Match ID for Trick 1'
+        required: false
+        default: '0'
+      trick_2_id:
+        description: 'Match ID for Trick 2'
+        required: false
+        default: ''
+      quality:
+        description: 'Render quality'
+        required: true
+        default: 'LOW'
+        type: choice
+        options:
+          - LOW
+          - 4K
+      pace:
+        description: 'Pace multiplier'
+        required: true
+        default: '3.5'
+      num_weeks:
+        description: 'Number of recent weeks'
+        required: false
+        default: '6'
 
-# ==============================================================================
-# HELPER FUNCTIONS
-# ==============================================================================
-def is_holiday(val):
-    v = str(val).strip().upper()
-    return v in HOLIDAY_MARKERS or any(h in v for h in ("*", "✪", "✱", "?"))
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    steps:
+      - name: Check out public repo
+        uses: actions/checkout@v4
 
-def clean_jodi(val):
-    if pd.isna(val): return ""
-    s = str(val).strip()
-    up = s.upper()
-    if up.startswith("GRID") or up in WEEKDAYS or up.startswith("DATE") or up == "TO":
-        return "HEADER"
-    if is_holiday(s):
-        return s
-    if s.replace(".0", "").isdigit():
-        return str(s.split(".")[0]).zfill(2)
-    return s
+      - name: Install System Dependencies & Fonts
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg libpango1.0-dev libcairo2-dev pkg-config fonts-noto-core fonts-indic
 
-def extract_start_date(date_text):
-    if not date_text or pd.isna(date_text): return "N/A"
-    m = re.search(r"(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})", str(date_text))
-    if not m: return str(date_text)[:10]
-    parts = re.split(r"[/-]", m.group(1))
-    if len(parts) == 3:
-        d, mth, y = parts
-        return f"{d.zfill(2)}/{mth.zfill(2)}/{y[-2:]}"
-    return str(date_text)[:10]
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-def get_cut_family(jodi):
-    if is_holiday(jodi) or jodi == "":
-        return set()
-    try:
-        a, b = int(jodi[0]), int(jodi[1])
-    except Exception:
-        return {jodi}
-    fam = set()
-    for x in (a, CUT_MAPPING[a]):
-        for y in (b, CUT_MAPPING[b]):
-            fam.add(f"{x}{y}")
-            fam.add(f"{y}{x}")
-    return {s.zfill(2) for s in fam}
+      - name: Fetch CH2 Code & Assets from Private Core
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        run: |
+          SLUG="${{ secrets.CORE_REPO_SLUG }}"
+          if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
+          echo "Cloning core scripts and assets from $SLUG..."
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${SLUG}.git" temp_core
 
-def find_excel_file():
-    candidates = glob.glob("*Kalyan*.xlsx") + glob.glob("*.xlsx")
-    if candidates:
-        return candidates[0]
-    return "Kalyan full jodi chart(correct).xlsx"
+          cp temp_core/kok_render.py ./ || true
+          cp temp_core/*Kalyan*.xlsx ./ || true
+          cp temp_core/bg_music*.mp3 ./ || true
+          cp temp_core/sfx_draw*.mp3 ./ || true
+          cp temp_core/audio_cta*.mp3 ./ || true
+          rm -rf temp_core
 
-# ==============================================================================
-# CORE ENGINE SCANNER
-# ==============================================================================
-def load_and_scan(current_week_str, num_weeks=6):
-    excel_path = find_excel_file()
-    if not os.path.exists(excel_path):
-        print(f"[ERROR] Excel chart file not found at: {excel_path}")
-        sys.exit(1)
+      - name: Install Python Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pandas openpyxl numpy requests manim edge-tts
 
-    raw = pd.read_excel(excel_path, engine="openpyxl", dtype=str, header=None)
-    cleaned_rows, dates, original_indices = [], [], []
+      - name: Run CH2 Video Engine
+        run: |
+          CURRENT_WEEK_ARG="${{ github.event.inputs.current_week }}"
 
-    for i, row in raw.iterrows():
-        row_vals = ["" if pd.isna(c) else str(c).strip() for c in row.tolist()]
-        if any(str(x).upper() in ("MON", "TUE", "WED", "THU", "FRI", "SAT", "DATE") for x in row_vals if x): continue
-        if any(str(x).upper().startswith("GRID") for x in row_vals if x): continue
+          if [ "${{ github.event.inputs.action_mode }}" = "Dry Run (Inspect Patterns Only)" ]; then
+            echo "Running Dry-Run to inspect pattern matches..."
+            python kok_render.py \
+              --current-week "$CURRENT_WEEK_ARG" \
+              --num-weeks "${{ github.event.inputs.num_weeks }}" \
+              --dry-run
+          else
+            echo "Running Full Video Generation..."
+            python kok_render.py \
+              --current-week "$CURRENT_WEEK_ARG" \
+              --t1 "${{ github.event.inputs.trick_1_id }}" \
+              --t2 "${{ github.event.inputs.trick_2_id }}" \
+              --quality "${{ github.event.inputs.quality }}" \
+              --pace "${{ github.event.inputs.pace }}" \
+              --num-weeks "${{ github.event.inputs.num_weeks }}"
+          fi
 
-        date_text = next((x for x in row_vals if x and ("/" in x or "-" in x)), "")
-        nonempty = [x for x in row_vals if x]
-        if len(nonempty) < len(WEEKDAYS): continue
+      - name: Remux Broadcast Master MOV (12Mbps CBR + FastStart)
+        if: github.event.inputs.action_mode != 'Dry Run (Inspect Patterns Only)'
+        run: |
+          SRC_FILE=$(find . -maxdepth 3 -type f -name "ch2_master_video.mp4" -o -name "*master*.mp4" | head -n 1)
+          if [ -z "$SRC_FILE" ]; then SRC_FILE="output/ch2_master_video.mp4"; fi
 
-        jodis = nonempty[-len(WEEKDAYS):]
-        cleaned = [clean_jodi(c) for c in jodis]
-        if any(c == "HEADER" for c in cleaned) or len(cleaned) != len(WEEKDAYS) or all(c == "" for c in cleaned): continue
+          if [ -f "$SRC_FILE" ]; then
+            mkdir -p output
+            ffmpeg -y -i "$SRC_FILE" \
+              -c:v libx264 -preset fast -profile:v main \
+              -b:v 12000k -minrate 12000k -maxrate 12000k -bufsize 12000k \
+              -x264-params "nal-hrd=cbr:force-cfr=1" \
+              -bf 1 -pix_fmt yuv420p \
+              -c:a aac -b:a 320k -ar 48000 \
+              -timecode "01:00:00:00" \
+              -movflags +faststart \
+              output/kalyan_master_video_ch2.mov
+          else
+            echo "::error::Source video MP4 not found!"
+            exit 1
+          fi
 
-        cleaned_rows.append(cleaned)
-        dates.append(date_text)
-        original_indices.append(i + 1)
-
-    jodi_df = pd.DataFrame(cleaned_rows, columns=WEEKDAYS).astype(str)
-    date_df = pd.Series(dates)
-    total_weeks = len(jodi_df)
-
-    # Parse manual inputs for Current Week (AN Row)
-    manual_entries = [x.strip() for x in current_week_str.split(",") if x.strip()] if current_week_str else []
-    target_row = [""] * len(WEEKDAYS)
-    for idx, val in enumerate(manual_entries[:len(WEEKDAYS)]):
-        if is_holiday(val):
-            target_row[idx] = val
-        elif val.isdigit():
-            target_row[idx] = val.zfill(2)
-        else:
-            target_row[idx] = val
-
-    # Target day is the first empty index
-    try:
-        target_day_idx = target_row.index("")
-    except ValueError:
-        target_day_idx = 0
-
-    target_df = pd.DataFrame([target_row], columns=WEEKDAYS)
-    history_needed = num_weeks
-    recent_df = pd.concat([jodi_df.iloc[-history_needed:], target_df], ignore_index=True)
-    recent_values = recent_df.values.tolist()
-    total_block_weeks = len(recent_values)
-
-    recent_family_block = [
-        [get_cut_family(j) for j in r]
-        for r in recent_values
-    ]
-
-    # Required active matching weeks check
-    searchable_weeks = set()
-    for wk in range(total_block_weeks):
-        for d in range(len(WEEKDAYS)):
-            if wk == total_block_weeks - 1 and d >= target_day_idx:
-                continue
-            if recent_values[wk][d] != "":
-                searchable_weeks.add(wk)
-    min_required_matches = len(searchable_weeks)
-
-    matches = []
-    max_search_idx = total_weeks - history_needed
-
-    for i in range(0, max_search_idx):
-        old_block = jodi_df.iloc[i : i + total_block_weeks].reset_index(drop=True)
-        if len(old_block) < total_block_weeks:
-            continue
-
-        matched_coords = []
-        for wk in range(total_block_weeks):
-            for d in range(len(WEEKDAYS)):
-                # Skip target day and future days in current week row
-                if wk == total_block_weeks - 1 and d >= target_day_idx:
-                    continue
-
-                ov = clean_jodi(old_block.iloc[wk, d])
-                cv = recent_values[wk][d]
-
-                if ov == "" or cv == "":
-                    continue
-
-                # Star holiday match or Family cut match (Evaluates W1-W5 and AN live inputs)
-                if is_holiday(ov) and is_holiday(cv):
-                    matched_coords.append({"week": wk, "day": d, "old_val": ov, "cur_val": cv, "is_star": True})
-                elif not is_holiday(ov) and not is_holiday(cv):
-                    if ov in recent_family_block[wk][d]:
-                        matched_coords.append({"week": wk, "day": d, "old_val": ov, "cur_val": cv, "is_star": False})
-
-        matched_weeks_count = len(set(m["week"] for m in matched_coords))
-        if matched_weeks_count >= min_required_matches:
-            matches.append({
-                "match_id": len(matches),
-                "start_row": original_indices[i],
-                "end_row": original_indices[i + total_block_weeks - 1],
-                "first_week_date": extract_start_date(date_df.iloc[i]),
-                "old_table": old_block.values.tolist(),
-                "cur_table": recent_values,
-                "matched_coords": matched_coords,
-                "target_day_index": target_day_idx
-            })
-
-    return matches, recent_values, target_day_idx
-
-# ==============================================================================
-# DRY-RUN ASCII DISPLAY
-# ==============================================================================
-def print_dry_run_patterns(matches, target_day_idx):
-    hdr = " M  T  W  T  F  S"
-    div = "-" * 23
-    print(f"\n>> TARGET DAY: {WEEKDAYS[target_day_idx]} (COL {target_day_idx + 1}) | TOTAL MATCHES FOUND: {len(matches)}")
-    print("=" * 24)
-
-    for m in matches:
-        old_rows = m["old_table"]
-        cur_rows = m["cur_table"]
-        target_d = m["target_day_index"]
-        matched_set = {(c["week"], c["day"]) for c in m["matched_coords"]}
-
-        print(f"\n[ID {m['match_id']}] Date: {m['first_week_date']} | Excel Rows: {m['start_row']}-{m['end_row']}")
-        print(div)
-
-        print("OLD HISTORICAL BLOCK:")
-        print(f"   {hdr}")
-        for r in range(len(old_rows)):
-            is_last = (r == len(old_rows) - 1)
-            lbl = f"W{r+1}" if not is_last else "AN"
-            row_str = ""
-            for c in range(len(WEEKDAYS)):
-                ov = clean_jodi(old_rows[r][c])
-                if is_last:
-                    if c == target_d: row_str += f"[{ov:>2}]"
-                    elif c < target_d and (r, c) in matched_set: row_str += f" {ov:>2}"
-                    else: row_str += " --"
-                else:
-                    if (r, c) in matched_set: row_str += f" {ov:>2}"
-                    else: row_str += " --"
-            print(f"{lbl:<2} {row_str}")
-
-        print("\nCURRENT BLOCK:")
-        print(f"   {hdr}")
-        for r in range(len(cur_rows)):
-            is_last = (r == len(cur_rows) - 1)
-            lbl = f"W{r+1}" if not is_last else "AN"
-            row_str = ""
-            for c in range(len(WEEKDAYS)):
-                cv = clean_jodi(cur_rows[r][c])
-                if is_last:
-                    if c == target_d: row_str += " [??]"
-                    elif c < target_d and (r, c) in matched_set: row_str += f" {cv:>2}"
-                    else: row_str += " --"
-                else:
-                    if (r, c) in matched_set: row_str += f" {cv:>2}"
-                    else: row_str += " --"
-            print(f"{lbl:<2} {row_str}")
-        print("=" * 24)
-
-# ==============================================================================
-# MANIM VIDEO GENERATION SCENE
-# ==============================================================================
-class CH2RenderScene(Scene):
-    def construct(self):
-        trick = self.trick_data
-        pace = self.pace_mult
-        target_d = trick["target_day_index"]
-        matched_set = {(m["week"], m["day"]): m for m in trick["matched_coords"]}
-
-        # Prepare 2D string matrices with masking applied
-        old_display, cur_display = [], []
-        total_rows = len(trick["old_table"])
-
-        for r in range(total_rows):
-            is_last = (r == total_rows - 1)
-            o_row, c_row = [], []
-            for c in range(len(WEEKDAYS)):
-                ov = clean_jodi(trick["old_table"][r][c])
-                cv = clean_jodi(trick["cur_table"][r][c])
-
-                if is_last:
-                    if c == target_d:
-                        o_row.append(ov)
-                        c_row.append("??")
-                    elif c < target_d and (r, c) in matched_set:
-                        o_row.append(ov)
-                        c_row.append(cv)
-                    else:
-                        o_row.append("")
-                        c_row.append("")
-                else:
-                    if (r, c) in matched_set:
-                        o_row.append(ov)
-                        c_row.append(cv)
-                    else:
-                        o_row.append("")
-                        c_row.append("")
-            old_display.append(o_row)
-            cur_display.append(c_row)
-
-        row_labels = [Text(f"W{i+1}", font_size=20, color=GRAY) for i in range(total_rows - 1)] + [Text("AN", font_size=20, color=YELLOW)]
-        col_labels = [Text(w, font_size=20, color=BLUE) for w in WEEKDAYS]
-
-        # Construct Old Grid
-        old_table = Table(
-            old_display,
-            row_labels=row_labels,
-            col_labels=col_labels,
-            include_outer_lines=True
-        ).scale(0.48).to_edge(LEFT, buff=0.8)
-
-        # Construct Current Grid
-        cur_table = Table(
-            cur_display,
-            row_labels=[l.copy() for l in row_labels],
-            col_labels=[l.copy() for l in col_labels],
-            include_outer_lines=True
-        ).scale(0.48).to_edge(RIGHT, buff=0.8)
-
-        # Header Titles
-        old_title = Text("HISTORICAL PATTERN", font_size=24, color=WHITE).next_to(old_table, UP)
-        cur_title = Text("CURRENT LIVE CHART", font_size=24, color=WHITE).next_to(cur_table, UP)
-
-        self.play(FadeIn(old_title), FadeIn(cur_title), run_time=0.6 * pace)
-        self.play(Create(old_table), Create(cur_table), run_time=1.0 * pace)
-        self.wait(0.5 * pace)
-
-        # Sort coordinates chronologically: W1 to AN, Mon to Sat
-        sorted_coords = sorted(trick["matched_coords"], key=lambda x: (x["week"], x["day"]))
-
-        # Animate every matched pair (including current week live matches)
-        for coord in sorted_coords:
-            r = coord["week"]
-            c = coord["day"]
-
-            # Table coordinates: row offset +2 (header + 1-indexed), col offset +2 (labels + 1-indexed)
-            cell_old = old_table.get_cell((r + 2, c + 2))
-            cell_cur = cur_table.get_cell((r + 2, c + 2))
-
-            color = RED if coord.get("is_star") else ORANGE
-
-            self.play(
-                cell_old.animate.set_fill(color, opacity=0.35).set_stroke(color, width=4),
-                cell_cur.animate.set_fill(color, opacity=0.35).set_stroke(color, width=4),
-                run_time=0.45 * pace
-            )
-
-        # Highlight Target Cell on Tuesday (or corresponding target day)
-        target_cell_old = old_table.get_cell((total_rows + 1, target_d + 2))
-        target_cell_cur = cur_table.get_cell((total_rows + 1, target_d + 2))
-
-        self.play(
-            target_cell_old.animate.set_fill(GREEN, opacity=0.45).set_stroke(GREEN, width=4),
-            target_cell_cur.animate.set_fill(YELLOW, opacity=0.45).set_stroke(YELLOW, width=4),
-            run_time=0.7 * pace
-        )
-        self.wait(1.5 * pace)
-
-# ==============================================================================
-# MAIN ENTRYPOINT
-# ==============================================================================
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Kalyan CH2 Video & Pattern Engine")
-    parser.add_argument("--current-week", type=str, default="", help="Current week jodis comma-separated")
-    parser.add_argument("--t1", type=str, default="0", help="Match ID for Trick 1")
-    parser.add_argument("--t2", type=str, default="", help="Match ID for Trick 2")
-    parser.add_argument("--quality", type=str, default="LOW", help="Render Quality: LOW or 4K")
-    parser.add_argument("--pace", type=float, default=3.5, help="Pace multiplier")
-    parser.add_argument("--num-weeks", type=int, default=6, help="Number of historical weeks")
-    parser.add_argument("--dry-run", action="store_true", help="Inspect patterns without video rendering")
-    args = parser.parse_args()
-
-    matches, current_chart, target_day = load_and_scan(args.current_week, num_weeks=args.num_weeks)
-
-    if args.dry_run:
-        print_dry_run_patterns(matches, target_day)
-        sys.exit(0)
-
-    # Full Video Render
-    t1_id = int(args.t1) if args.t1.isdigit() else 0
-    selected_trick = next((m for m in matches if m["match_id"] == t1_id), None)
-    if not selected_trick:
-        if matches:
-            selected_trick = matches[0]
-            print(f"[WARN] Trick ID {t1_id} not found, defaulting to ID 0")
-        else:
-            print("[ERROR] No pattern matches found with current inputs.")
-            sys.exit(1)
-
-    # Configure Manim config quality
-    config.pixel_height = 480 if args.quality == "LOW" else 2160
-    config.pixel_width = 854 if args.quality == "LOW" else 3840
-    config.frame_rate = 15 if args.quality == "LOW" else 60
-    config.output_file = "ch2_master_video.mp4"
-
-    os.makedirs("output", exist_ok=True)
-    scene = CH2RenderScene()
-    scene.trick_data = selected_trick
-    scene.pace_mult = args.pace
-    scene.render()
-
-    # Normalize output destination to output/ch2_master_video.mp4
-    default_rendered = scene.renderer.file_writer.movie_file_path
-    if default_rendered and os.path.exists(default_rendered):
-        import shutil
-        shutil.copyfile(default_rendered, "output/ch2_master_video.mp4")
-        print("[SUCCESS] Master video created at: output/ch2_master_video.mp4")
+      - name: Publish Video to Private Repo Releases
+        if: github.event.inputs.action_mode != 'Dry Run (Inspect Patterns Only)'
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        run: |
+          SLUG="${{ secrets.CORE_REPO_SLUG }}"
+          if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
+          gh release upload latest-ch2 output/kalyan_master_video_ch2.mov --repo "$SLUG" --clobber
