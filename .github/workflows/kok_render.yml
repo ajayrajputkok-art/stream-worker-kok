@@ -7,6 +7,10 @@ on:
         description: 'Action execution mode'
         required: false
         default: 'Full Render & Stream'
+        type: choice
+        options:
+          - 'Full Render & Stream'
+          - 'Dry Run (Inspect Patterns Only)'
       current_week:
         description: 'Current week jodis'
         required: true
@@ -81,6 +85,7 @@ jobs:
             --num-weeks "${{ github.event.inputs.num_weeks }}"
 
       - name: Remux Broadcast Master MOV (12Mbps Heavy CBR + Studio Flag Delay)
+        if: github.event.inputs.action_mode != 'Dry Run (Inspect Patterns Only)'
         run: |
           mkdir -p output
           SRC_FILE=$(find . -maxdepth 3 -type f -name "ch2_master_video.mp4" -o -name "*master*.mp4" | head -n 1)
@@ -106,6 +111,7 @@ jobs:
           fi
 
       - name: Publish Master MOV to Private Repo Release
+        if: github.event.inputs.action_mode != 'Dry Run (Inspect Patterns Only)'
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
         run: |
