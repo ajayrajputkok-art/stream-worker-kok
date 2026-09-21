@@ -3,32 +3,41 @@ name: Stream CH2 to YouTube RTMP
 on:
   workflow_dispatch:
     inputs:
-      stream_duration_mins:
-        description: 'Stream duration in minutes'
-        required: false
-        default: '42'
+      stream_mode:
+        description: 'Choose Streaming Duration'
+        required: true
+        default: 'Single Timed Stream (~40 mins)'
+        type: choice
+        options:
+          - 'Single Timed Stream (~40 mins)'
+          - 'Until Manually Stopped (Continuous Loop)'
+
+concurrency:
+  group: stream-ch2-active
+  cancel-in-progress: false
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+    timeout-minutes: 360
+    permissions:
+      actions: write
+      contents: read
 
+    steps:
       - name: Install System FFmpeg
-        run: sudo apt-get update -y && sudo apt-get install -y --no-install-recommends ffmpeg
+        run: sudo apt-get update -y && sudo apt-get install -y --no-install-recommends ffmpeg curl
 
       - name: Download Latest CH2 Video from Private Release
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
         run: |
-          gh release download latest-ch2 \
-            --repo ajayrajputkok-art/KOKStream \
-            -p "kalyan_master_video_ch2.mov" \
-            --output stream_video_ch2.mov \
-            --clobber
+          SLUG="${{ secrets.CORE_REPO_SLUG }}"
+          if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
+          echo "Downloading latest CH2 video from $SLUG..."
+          gh release download latest-ch2 --repo "$SLUG" -p "kalyan_master_video_ch2.mov" --output stream_video_ch2.mov --clobber
 
-      - name: Verify Video
+      - name: Verify Video Metadata
         run: |
           ffprobe -v error \
             -show_entries format=duration,size,bit_rate \
@@ -38,14 +47,22 @@ jobs:
       - name: Stream to YouTube RTMP
         env:
           STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY_CH2 }}
+          MODE: ${{ github.event.inputs.stream_mode }}
         run: |
           if [ -z "$STREAM_KEY" ]; then
             echo "::error::Secret YOUTUBE_STREAM_KEY_CH2 is not set!"
             exit 1
           fi
 
-          DURATION=$((2400 + RANDOM % 121))
-          echo "Streaming for ${DURATION}s (~$(( DURATION / 60 ))m)..."
+          if [[ "$MODE" == *"Until Manually Stopped"* ]]; then
+            # 5.5 hours (19800s) runner chunk for safe relay handoff
+            DURATION=19800
+            echo "Mode: MANUAL STOP (Continuous Loop, 5.5h runner chunk)..."
+          else
+            # ~40-42 minutes single broadcast
+            DURATION=$((2400 + RANDOM % 121))
+            echo "Mode: TIMED (${DURATION}s / ~$(( DURATION / 60 )) mins)..."
+          fi
 
           ffmpeg -re -stream_loop -1 -fflags +genpts -i stream_video_ch2.mov \
             -t "$DURATION" \
@@ -54,3 +71,11 @@ jobs:
             -flvflags no_duration_filesize \
             -f flv \
             "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY"
+
+      - name: Trigger Next Relay Runner (Manual Stop Mode Only)
+        if: always() && contains(github.event.inputs.stream_mode, 'Until Manually Stopped')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Triggering next relay runner to maintain 24/7 continuous stream..."
+          gh workflow run "Stream CH2 to YouTube RTMP" -f "stream_mode=Until Manually Stopped (Continuous Loop)"
