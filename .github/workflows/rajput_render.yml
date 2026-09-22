@@ -66,7 +66,6 @@ jobs:
           echo "Cloning core scripts and assets from $SLUG..."
           git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${SLUG}.git" temp_core
           
-          # Copy render script, data file, and audio assets
           cp temp_core/rajput_render.py ./ || true
           cp temp_core/*Kalyan*.xlsx ./ || true
           cp temp_core/bg_music*.mp3 ./ || true
@@ -77,8 +76,7 @@ jobs:
       - name: Install Python Dependencies
         run: |
           pip install --upgrade pip
-          pip install pandas openpyxl numpy requests
-          pip install manim edge-tts
+          pip install pandas openpyxl numpy requests manim edge-tts
 
       - name: Run Rajput Video Engine
         run: |
@@ -101,18 +99,26 @@ jobs:
               --num-weeks "${{ github.event.inputs.num_weeks }}"
           fi
 
-      - name: Remux Broadcast Master MOV (12Mbps CBR + PCM Audio)
+      - name: Remux Broadcast Master MOV (12Mbps CBR + FastStart)
         if: github.event.inputs.action_mode != 'Dry Run (Inspect Patterns Only)'
         run: |
-          if [ -f "output/kalyan_master_video.mp4" ]; then
-            ffmpeg -y -i output/kalyan_master_video.mp4 \
+          SRC_FILE=$(find . -maxdepth 3 -type f -name "kalyan_master_video.mp4" -o -name "*master*.mp4" | head -n 1)
+          if [ -z "$SRC_FILE" ]; then SRC_FILE="output/kalyan_master_video.mp4"; fi
+
+          if [ -f "$SRC_FILE" ]; then
+            mkdir -p output
+            ffmpeg -y -i "$SRC_FILE" \
               -c:v libx264 -preset fast -profile:v main \
               -b:v 12000k -minrate 12000k -maxrate 12000k -bufsize 12000k \
               -x264-params "nal-hrd=cbr:force-cfr=1" \
               -bf 1 -pix_fmt yuv420p \
-              -c:a pcm_s24le -ar 48000 \
+              -c:a aac -b:a 320k -ar 48000 \
               -timecode "01:00:00:00" \
+              -movflags +faststart \
               output/kalyan_master_video.mov
+          else
+            echo "::error::Source video MP4 not found!"
+            exit 1
           fi
 
       - name: Publish Video to Private Repo Releases
