@@ -25,6 +25,9 @@ jobs:
       contents: read
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Install System FFmpeg
         run: sudo apt-get update -y && sudo apt-get install -y --no-install-recommends ffmpeg curl
 
@@ -32,8 +35,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Downloading kalyan_master_video_ch2.mov from release latest-ch2..."
+          echo "Downloading kalyan_master_video_ch2.mov from $GITHUB_REPOSITORY release latest-ch2..."
           gh release download latest-ch2 \
+            --repo "$GITHUB_REPOSITORY" \
             --pattern "kalyan_master_video_ch2.mov" \
             --clobber
 
