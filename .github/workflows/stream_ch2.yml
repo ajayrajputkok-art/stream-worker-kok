@@ -25,8 +25,8 @@ jobs:
       contents: read
 
     steps:
-      - name: Install System FFmpeg
-        run: sudo apt-get update -y && sudo apt-get install -y --no-install-recommends ffmpeg curl
+      - name: Install System FFmpeg & Tools
+        run: sudo apt-get update -y && sudo apt-get install -y --no-install-recommends ffmpeg curl jq
 
       - name: Download Latest CH2 Video from Private Release
         env:
@@ -34,8 +34,28 @@ jobs:
         run: |
           SLUG="${{ secrets.CORE_REPO_SLUG }}"
           if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
-          echo "Downloading latest CH2 video from $SLUG..."
-          gh release download latest-ch2 --repo "$SLUG" -p "kalyan_master_video_ch2.mov" --output stream_video_ch2.mov --clobber
+          echo "Connecting to $SLUG release latest-ch2..."
+
+          # Fetch asset API url directly to avoid CLI 404 bugs on private repos
+          ASSET_URL=$(curl -s -H "Authorization: token ${GH_TOKEN}" \
+            "https://api.github.com/repos/${SLUG}/releases/tags/latest-ch2" | \
+            jq -r '.assets[] | select(.name=="kalyan_master_video_ch2.mov") | .url')
+
+          if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
+            echo "Direct API asset lookup failed. Falling back to gh cli..."
+            gh release download latest-ch2 --repo "$SLUG" --pattern "kalyan_master_video_ch2.mov" --clobber
+            mv kalyan_master_video_ch2.mov stream_video_ch2.mov
+          else
+            echo "Downloading binary asset from: $ASSET_URL"
+            curl -L -H "Authorization: token ${GH_TOKEN}" \
+                 -H "Accept: application/octet-stream" \
+                 "$ASSET_URL" -o stream_video_ch2.mov
+          fi
+
+          if [ ! -s stream_video_ch2.mov ]; then
+            echo "::error::Video file failed to download or is 0 bytes!"
+            exit 1
+          fi
 
       - name: Verify Video Metadata
         run: |
