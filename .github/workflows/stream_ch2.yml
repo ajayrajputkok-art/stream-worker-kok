@@ -31,13 +31,16 @@ jobs:
       - name: Install System FFmpeg
         run: sudo apt-get update -y && sudo apt-get install -y --no-install-recommends ffmpeg curl
 
-      - name: Download Latest CH2 Video from Release
+      - name: Download Latest CH2 Video from Private Release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
         run: |
-          echo "Downloading kalyan_master_video_ch2.mov from $GITHUB_REPOSITORY release latest-ch2..."
+          SLUG="${{ secrets.CORE_REPO_SLUG }}"
+          if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
+
+          echo "Downloading latest video from private repo: $SLUG (release: latest-ch2)..."
           gh release download latest-ch2 \
-            --repo "$GITHUB_REPOSITORY" \
+            --repo "$SLUG" \
             --pattern "kalyan_master_video_ch2.mov" \
             --clobber
 
