@@ -57,7 +57,7 @@ jobs:
             echo "Mode: TIMED (${DURATION}s / ~$(( DURATION / 60 )) mins)..."
           fi
 
-          # Automatic restart loop: if YouTube disconnects or pipe breaks, it restarts within 2 seconds
+          # Auto-restart loop handles network hiccups during normal streaming
           until ffmpeg -re -stream_loop -1 -fflags +genpts -i stream_video.mov \
             -t "$DURATION" \
             -c:v copy \
@@ -70,7 +70,8 @@ jobs:
           done
 
       - name: Trigger Next Relay Runner (Manual Stop Mode Only)
-        if: always() && contains(github.event.inputs.stream_mode, 'Until Manually Stopped')
+        # Only triggers when the 5.5h run completes naturally; SKIPS if cancelled
+        if: success() && contains(github.event.inputs.stream_mode, 'Until Manually Stopped')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
