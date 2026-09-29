@@ -48,38 +48,25 @@ jobs:
           fi
 
           if [[ "$MODE" == *"Until Manually Stopped"* ]]; then
-            # 5 hours 30 minutes (19800s) runner chunk for safe relay before 6h timeout
+            # 5 hours 30 minutes (19800s) chunk before safe relay
             DURATION=19800
             echo "Mode: MANUAL STOP (Continuous Loop, 5.5h runner chunk)..."
           else
-            # ~40-42 minutes single broadcast
+            # Single broadcast
             DURATION=$((2400 + RANDOM % 121))
             echo "Mode: TIMED (${DURATION}s / ~$(( DURATION / 60 )) mins)..."
           fi
 
-          START_TIME=$(date +%s)
-          END_TIME=$(( START_TIME + DURATION ))
-
-          # Resilient loop: If YouTube disconnects or throws Broken pipe, reconnect immediately
-          while [ $(date +%s) -lt $END_TIME ]; do
-            REMAINING=$(( END_TIME - $(date +%s) ))
-            if [ $REMAINING -le 5 ]; then
-              break
-            fi
-
-            echo ">> Starting/Resuming stream ($REMAINING seconds remaining in this runner)..."
-
-            ffmpeg -re -stream_loop -1 -fflags +genpts -i stream_video.mov \
-              -t "$REMAINING" \
-              -c:v copy \
-              -c:a aac -b:a 192k -ar 48000 \
-              -max_muxing_queue_size 4096 \
-              -flvflags no_duration_filesize+flush_packets \
-              -f flv \
-              "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY" || true
-
-            echo ">> Connection dropped or finished. Waiting 3 seconds before reconnect check..."
-            sleep 3
+          # Automatic restart loop: if YouTube disconnects or pipe breaks, it restarts within 2 seconds
+          until ffmpeg -re -stream_loop -1 -fflags +genpts -i stream_video.mov \
+            -t "$DURATION" \
+            -c:v copy \
+            -c:a aac -b:a 192k -ar 48000 \
+            -flvflags no_duration_filesize \
+            -f flv \
+            "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY"; do
+              echo ">> Connection dropped or pipe broken! Restarting stream in 2 seconds..."
+              sleep 2
           done
 
       - name: Trigger Next Relay Runner (Manual Stop Mode Only)
@@ -88,6 +75,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Triggering next relay runner to maintain 24/7 continuous stream..."
-          gh workflow run "${{ github.workflow }}" \
+          gh workflow run "Stream Rajput to YouTube RTMP" \
             --repo "${{ github.repository }}" \
             -f "stream_mode=Until Manually Stopped (Continuous Loop)"
