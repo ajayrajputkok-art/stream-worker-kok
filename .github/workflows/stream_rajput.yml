@@ -12,9 +12,10 @@ on:
           - 'Until Manually Stopped (Continuous Loop)'
           - 'Single Timed Stream (~40 mins)'
 
+# Cancels any previous or queued runs immediately when a new one starts or stops
 concurrency:
   group: stream-rajput-active
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   stream:
@@ -47,31 +48,48 @@ jobs:
             exit 1
           fi
 
+          # Exit immediately if process receives SIGINT/SIGTERM (user clicks Cancel)
+          trap 'echo "Workflow cancelled by user. Exiting immediately..."; exit 130' INT TERM
+
           if [[ "$MODE" == *"Until Manually Stopped"* ]]; then
-            # 5 hours 30 minutes (19800s) chunk before safe relay
             DURATION=19800
             echo "Mode: MANUAL STOP (Continuous Loop, 5.5h runner chunk)..."
           else
-            # Single broadcast
             DURATION=$((2400 + RANDOM % 121))
             echo "Mode: TIMED (${DURATION}s / ~$(( DURATION / 60 )) mins)..."
           fi
 
-          # Auto-restart loop handles network hiccups during normal streaming
-          until ffmpeg -re -stream_loop -1 -fflags +genpts -i stream_video.mov \
-            -t "$DURATION" \
-            -c:v copy \
-            -c:a aac -b:a 192k -ar 48000 \
-            -flvflags no_duration_filesize \
-            -f flv \
-            "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY"; do
-              echo ">> Connection dropped or pipe broken! Restarting stream in 2 seconds..."
-              sleep 2
+          START_TIME=$(date +%s)
+          END_TIME=$(( START_TIME + DURATION ))
+
+          while [ $(date +%s) -lt $END_TIME ]; do
+            REMAINING=$(( END_TIME - $(date +%s) ))
+            if [ $REMAINING -le 5 ]; then
+              break
+            fi
+
+            echo ">> Streaming to YouTube RTMP ($REMAINING seconds left in chunk)..."
+            ffmpeg -re -stream_loop -1 -fflags +genpts -i stream_video.mov \
+              -t "$REMAINING" \
+              -c:v copy \
+              -c:a aac -b:a 192k -ar 48000 \
+              -flvflags no_duration_filesize \
+              -f flv \
+              "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY" || true
+
+            # If user pressed cancel or runner is terminating, break the loop
+            if [ $? -eq 130 ]; then
+              break
+            fi
+
+            echo ">> Stream interrupted/reconnecting in 2 seconds..."
+            sleep 2
           done
 
       - name: Trigger Next Relay Runner (Manual Stop Mode Only)
-        # Only triggers when the 5.5h run completes naturally; SKIPS if cancelled
-        if: success() && contains(github.event.inputs.stream_mode, 'Until Manually Stopped')
+        # Strictly ensures this step runs ONLY if the stream step completed all 5.5h with SUCCESS.
+        # If cancelled, this step is 100% skipped.
+        if: success() && github.event.inputs.stream_mode == 'Until Manually Stopped (Continuous Loop)'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
