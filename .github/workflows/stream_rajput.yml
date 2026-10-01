@@ -12,10 +12,11 @@ on:
           - 'Until Manually Stopped (Continuous Loop)'
           - 'Single Timed Stream (~40 mins)'
 
-# Cancels any previous or queued runs immediately when a new one starts or stops
 concurrency:
   group: stream-rajput-active
-  cancel-in-progress: true
+  # Ensures running workflows are NEVER cancelled when a new one is dispatched;
+  # New workflows remain in 'Pending / Queued' state waiting for the current run to finish.
+  cancel-in-progress: false
 
 jobs:
   stream:
@@ -48,8 +49,8 @@ jobs:
             exit 1
           fi
 
-          # Exit immediately if process receives SIGINT/SIGTERM (user clicks Cancel)
-          trap 'echo "Workflow cancelled by user. Exiting immediately..."; exit 130' INT TERM
+          # Catch cancellation signals so it doesn't leave lingering loops
+          trap 'echo "Workflow cancelled by user. Terminating stream immediately..."; exit 130' INT TERM
 
           if [[ "$MODE" == *"Until Manually Stopped"* ]]; then
             DURATION=19800
@@ -77,7 +78,7 @@ jobs:
               -f flv \
               "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY" || true
 
-            # If user pressed cancel or runner is terminating, break the loop
+            # If user pressed cancel (SIGINT / SIGTERM), break immediately
             if [ $? -eq 130 ]; then
               break
             fi
@@ -86,14 +87,24 @@ jobs:
             sleep 2
           done
 
+          # Create a completion token ONLY if the full duration completed naturally
+          if [ $(date +%s) -ge $END_TIME ]; then
+            touch /tmp/stream_chunk_completed_normally
+          fi
+
       - name: Trigger Next Relay Runner (Manual Stop Mode Only)
-        # Strictly ensures this step runs ONLY if the stream step completed all 5.5h with SUCCESS.
-        # If cancelled, this step is 100% skipped.
+        # 1. Must have succeeded without errors or cancellation.
+        # 2. Must be in Continuous Loop mode.
+        # 3. Must have verified normal completion token (guarantees no relay if manually cancelled).
         if: success() && github.event.inputs.stream_mode == 'Until Manually Stopped (Continuous Loop)'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Triggering next relay runner to maintain 24/7 continuous stream..."
-          gh workflow run "Stream Rajput to YouTube RTMP" \
-            --repo "${{ github.repository }}" \
-            -f "stream_mode=Until Manually Stopped (Continuous Loop)"
+          if [ -f /tmp/stream_chunk_completed_normally ]; then
+            echo "Chunk finished normally. Triggering next relay runner to maintain 24/7 stream..."
+            gh workflow run "Stream Rajput to YouTube RTMP" \
+              --repo "${{ github.repository }}" \
+              -f "stream_mode=Until Manually Stopped (Continuous Loop)"
+          else
+            echo "Stream was stopped prematurely or cancelled. Skipping relay runner dispatch."
+          fi
