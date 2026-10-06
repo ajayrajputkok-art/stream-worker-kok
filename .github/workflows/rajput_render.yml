@@ -108,9 +108,10 @@ jobs:
           if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
 
           OUTPUT_FILE="output/kalyan_master_video.mp4"
-          if [ -f "$OUTPUT_FILE" ]; then
-            gh release upload latest "$OUTPUT_FILE" --repo "$SLUG" --clobber
+          OUTPUT_FILE_1080P="output/kalyan_master_video_1080p.mp4"
+          if [ -f "$OUTPUT_FILE" ] && [ -f "$OUTPUT_FILE_1080P" ]; then
+            gh release upload latest "$OUTPUT_FILE" "$OUTPUT_FILE_1080P" --repo "$SLUG" --clobber
           else
-            echo "::error::Master video MP4 file not found!"
+            echo "::error::Master video or 1080p MP4 file not found!"
             exit 1
           fi
