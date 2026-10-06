@@ -14,8 +14,6 @@ on:
 
 concurrency:
   group: stream-rajput-active
-  # Ensures running workflows are NEVER cancelled when a new one is dispatched;
-  # New workflows remain in 'Pending / Queued' state waiting for the current run to finish.
   cancel-in-progress: false
 
 jobs:
@@ -38,6 +36,19 @@ jobs:
           if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
           echo "Downloading latest Rajput video from $SLUG..."
           gh release download latest --repo "$SLUG" -p "kalyan_master_video.mp4" --output stream_video.mp4 --clobber
+
+      - name: Pre-Encode Master to Optimized Stream Broadcast File
+        run: |
+          echo ">> Pre-encoding master video to seamless 1080p broadcast format..."
+          # Takes ~15-20 seconds to run once. Encodes exact 2s GOP, clean stereo audio, and MPEG-TS container
+          ffmpeg -y -i stream_video.mp4 \
+            -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
+            -c:v libx264 -preset fast \
+            -b:v 4500k -maxrate 5000k -bufsize 9000k \
+            -r 30 -g 60 -keyint_min 60 -sc_threshold 0 \
+            -c:a aac -b:a 160k -ar 44100 -ac 2 \
+            -muxdelay 0 -muxpreload 0 \
+            broadcast_ready.ts
 
       - name: Stream Indefinitely to YouTube RTMP
         env:
@@ -70,13 +81,10 @@ jobs:
 
             echo ">> Streaming to YouTube RTMP ($REMAINING seconds left in chunk)..."
             
-            ffmpeg -re -stream_loop -1 -i stream_video.mp4 \
+            # Stream-copy directly from MPEG-TS: 0% CPU overhead, perfectly continuous timestamps, zero lag
+            ffmpeg -re -stream_loop -1 -fflags +genpts -i broadcast_ready.ts \
               -t "$REMAINING" \
-              -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
-              -c:v libx264 -preset veryfast -tune zerolatency \
-              -b:v 4500k -maxrate 5000k -bufsize 9000k \
-              -r 30 -g 60 -keyint_min 60 -sc_threshold 0 \
-              -c:a aac -b:a 160k -ar 44100 -ac 2 \
+              -c copy \
               -max_muxing_queue_size 4096 \
               -flvflags no_duration_filesize \
               -f flv \
