@@ -37,6 +37,21 @@ jobs:
           echo "Downloading latest Rajput video from $SLUG..."
           gh release download latest --repo "$SLUG" -p "kalyan_master_video.mp4" --output stream_video.mp4 --clobber
 
+      - name: Prepare Live-Safe Stream Video
+        run: |
+          # One-time offline conversion (not real-time): 1080p30, steady 6000k bitrate,
+          # keyframe every 2s, audio/video lengths matched. Makes the copy-stream below safe for YouTube.
+          ffmpeg -y -i stream_video.mp4 \
+            -vf "scale=1920:1080:flags=lanczos,fps=30,format=yuv420p" \
+            -c:v libx264 -preset veryfast -profile:v high \
+            -b:v 6000k -maxrate 6000k -bufsize 12000k \
+            -x264-params nal-hrd=cbr \
+            -g 60 -keyint_min 60 -sc_threshold 0 \
+            -af apad -c:a aac -b:a 128k -ar 44100 -ac 2 \
+            -shortest -movflags +faststart \
+            stream_ready.mp4
+          mv stream_ready.mp4 stream_video.mp4
+
       - name: Stream Indefinitely to YouTube RTMP
         env:
           STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
@@ -76,12 +91,36 @@ jobs:
             echo ">> Streaming via lightweight copy pipeline ($REMAINING seconds remaining)..."
 
             # 0% CPU - No filters, no re-encoding, speed pinned at 1.00x, drop=0
+            : > /tmp/ff_progress.txt
             ffmpeg -re -f concat -safe 0 -i playlist.txt \
               -t "$REMAINING" \
               -c copy \
               -flvflags no_duration_filesize \
+              -progress /tmp/ff_progress.txt -stats_period 5 \
               -f flv \
-              "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY" || true
+              "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY" &
+            FF_PID=$!
+
+            # Watchdog: if ffmpeg freezes (output size stops growing) but never exits,
+            # kill it so the loop below reconnects to YouTube.
+            LAST_SIZE=""
+            STALL=0
+            while kill -0 "$FF_PID" 2>/dev/null; do
+              sleep 10
+              CUR_SIZE=$(grep '^total_size=' /tmp/ff_progress.txt | tail -1 | cut -d= -f2)
+              if [ "$CUR_SIZE" = "$LAST_SIZE" ]; then
+                STALL=$((STALL + 1))
+              else
+                STALL=0
+              fi
+              LAST_SIZE="$CUR_SIZE"
+              if [ $STALL -ge 2 ]; then
+                echo ">> No data sent to YouTube for ~20s. Restarting ffmpeg..."
+                kill -9 "$FF_PID" 2>/dev/null || true
+                break
+              fi
+            done
+            wait "$FF_PID" 2>/dev/null || true
 
             if [ $? -eq 130 ]; then
               break
