@@ -68,14 +68,13 @@ jobs:
 
             echo ">> Streaming to YouTube RTMP ($REMAINING seconds left in chunk)..."
             
-            # Encodes with frame-based monotonic timestamps so loops never reset PTS/DTS to 0
-            ffmpeg -re -stream_loop -1 -i stream_video.mp4 \
+            ffmpeg -re -stream_loop -1 -fflags +genpts -i stream_video.mp4 \
               -t "$REMAINING" \
-              -vf "setpts=N/30/TB,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
-              -af "asetpts=N/SR/TB,aresample=async=1000:first_pts=0" \
+              -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
               -c:v libx264 -preset ultrafast -tune zerolatency \
               -b:v 4500k -maxrate 5000k -bufsize 9000k \
-              -r 30 -g 60 -keyint_min 60 -sc_threshold 0 \
+              -r 60 -g 120 -keyint_min 120 -sc_threshold 0 \
+              -fps_mode cfr \
               -c:a aac -b:a 160k -ar 44100 -ac 2 \
               -max_muxing_queue_size 4096 \
               -flvflags no_duration_filesize \
