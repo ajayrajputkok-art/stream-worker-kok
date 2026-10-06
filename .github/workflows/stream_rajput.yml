@@ -1,45 +1,4 @@
-name: Stream Rajput to YouTube RTMP
-
-on:
-  workflow_dispatch:
-    inputs:
-      stream_mode:
-        description: 'Choose Streaming Duration'
-        required: true
-        default: 'Until Manually Stopped (Continuous Loop)'
-        type: choice
-        options:
-          - 'Until Manually Stopped (Continuous Loop)'
-          - 'Single Timed Stream (~40 mins)'
-
-concurrency:
-  group: stream-rajput-active
-  # Ensures running workflows are NEVER cancelled when a new one is dispatched;
-  # New workflows remain in 'Pending / Queued' state waiting for the current run to finish.
-  cancel-in-progress: false
-
-jobs:
-  stream:
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    permissions:
-      actions: write
-      contents: read
-
-    steps:
-      - name: Install System FFmpeg
-        run: sudo apt-get update -y && sudo apt-get install -y --no-install-recommends ffmpeg curl
-
-      - name: Download Latest Master Video from Private Release
-        env:
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
-        run: |
-          SLUG="${{ secrets.CORE_REPO_SLUG }}"
-          if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
-          echo "Downloading latest Rajput video from $SLUG..."
-          gh release download latest --repo "$SLUG" -p "kalyan_master_video.mp4" --output stream_video.mp4 --clobber
-
-      - name: Stream Indefinitely to YouTube RTMP
+- name: Stream Indefinitely to YouTube RTMP
         env:
           STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
           MODE: ${{ github.event.inputs.stream_mode }}
@@ -70,8 +29,7 @@ jobs:
 
             echo ">> Streaming to YouTube RTMP ($REMAINING seconds left in chunk)..."
             
-            ffmpeg -re -stream_loop -1 -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2 \
-              -i stream_video.mp4 \
+            ffmpeg -re -stream_loop -1 -i stream_video.mp4 \
               -t "$REMAINING" \
               -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
               -c:v libx264 -preset veryfast -tune zerolatency \
@@ -93,18 +51,4 @@ jobs:
 
           if [ $(date +%s) -ge $END_TIME ]; then
             touch /tmp/stream_chunk_completed_normally
-          fi
-
-      - name: Trigger Next Relay Runner (Manual Stop Mode Only)
-        if: success() && github.event.inputs.stream_mode == 'Until Manually Stopped (Continuous Loop)'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if [ -f /tmp/stream_chunk_completed_normally ]; then
-            echo "Chunk finished normally. Triggering next relay runner to maintain 24/7 stream..."
-            gh workflow run "Stream Rajput to YouTube RTMP" \
-              --repo "${{ github.repository }}" \
-              -f "stream_mode=Until Manually Stopped (Continuous Loop)"
-          else
-            echo "Stream was stopped prematurely or cancelled. Skipping relay runner dispatch."
           fi
