@@ -35,7 +35,7 @@ jobs:
           SLUG="${{ secrets.CORE_REPO_SLUG }}"
           if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
           echo "Downloading latest Rajput video from $SLUG..."
-          gh release download latest --repo "$SLUG" -p "kalyan_master_video.mov" --output stream_video.mov --clobber
+          gh release download latest --repo "$SLUG" -p "kalyan_master_video.mp4" --output stream_video.mp4 --clobber
 
       - name: Stream Indefinitely to YouTube RTMP
         env:
@@ -57,6 +57,13 @@ jobs:
             echo "Mode: TIMED (${DURATION}s / ~$(( DURATION / 60 )) mins)..."
           fi
 
+          # Generate a repeating playlist. Concat demuxer automatically recalculates 
+          # timestamps across loops without re-encoding or resetting PTS to zero!
+          > playlist.txt
+          for i in {1..200}; do
+            echo "file 'stream_video.mp4'" >> playlist.txt
+          done
+
           START_TIME=$(date +%s)
           END_TIME=$(( START_TIME + DURATION ))
 
@@ -66,11 +73,12 @@ jobs:
               break
             fi
 
-            echo ">> Streaming to YouTube RTMP ($REMAINING seconds left in chunk)..."
-            ffmpeg -re -stream_loop -1 -fflags +genpts -i stream_video.mov \
+            echo ">> Streaming via lightweight copy pipeline ($REMAINING seconds remaining)..."
+
+            # 0% CPU - No filters, no re-encoding, speed pinned at 1.00x, drop=0
+            ffmpeg -re -f concat -safe 0 -i playlist.txt \
               -t "$REMAINING" \
-              -c:v copy \
-              -c:a aac -b:a 192k -ar 48000 -ac 2 \
+              -c copy \
               -flvflags no_duration_filesize \
               -f flv \
               "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY" || true
