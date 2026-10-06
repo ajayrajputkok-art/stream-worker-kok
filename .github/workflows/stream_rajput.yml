@@ -35,7 +35,7 @@ jobs:
           SLUG="${{ secrets.CORE_REPO_SLUG }}"
           if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
           echo "Downloading latest Rajput video from $SLUG..."
-          gh release download latest --repo "$SLUG" -p "kalyan_master_video.mp4" --output stream_video.mp4 --clobber
+          gh release download latest --repo "$SLUG" -p "kalyan_master_video.mov" --output stream_video.mov --clobber
 
       - name: Stream Indefinitely to YouTube RTMP
         env:
@@ -67,16 +67,10 @@ jobs:
             fi
 
             echo ">> Streaming to YouTube RTMP ($REMAINING seconds left in chunk)..."
-            
-            ffmpeg -re -stream_loop -1 -fflags +genpts -i stream_video.mp4 \
+            ffmpeg -re -stream_loop -1 -fflags +genpts -i stream_video.mov \
               -t "$REMAINING" \
-              -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
-              -c:v libx264 -preset ultrafast -tune zerolatency \
-              -b:v 4500k -maxrate 5000k -bufsize 9000k \
-              -r 60 -g 120 -keyint_min 120 -sc_threshold 0 \
-              -fps_mode cfr \
-              -c:a aac -b:a 160k -ar 44100 -ac 2 \
-              -max_muxing_queue_size 4096 \
+              -c:v copy \
+              -c:a aac -b:a 192k -ar 48000 -ac 2 \
               -flvflags no_duration_filesize \
               -f flv \
               "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY" || true
