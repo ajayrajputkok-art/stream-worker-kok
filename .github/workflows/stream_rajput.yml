@@ -37,7 +37,6 @@ jobs:
           SLUG="${{ secrets.CORE_REPO_SLUG }}"
           if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
           echo "Downloading latest Rajput video from $SLUG..."
-          # Download the MP4 file which has proper H.264 video and pre-mixed stereo audio
           gh release download latest --repo "$SLUG" -p "kalyan_master_video.mp4" --output stream_video.mp4 --clobber
 
       - name: Stream Indefinitely to YouTube RTMP
@@ -50,7 +49,6 @@ jobs:
             exit 1
           fi
 
-          # Catch cancellation signals so it doesn't leave lingering loops
           trap 'echo "Workflow cancelled by user. Terminating stream immediately..."; exit 130' INT TERM
 
           if [[ "$MODE" == *"Until Manually Stopped"* ]]; then
@@ -72,19 +70,19 @@ jobs:
 
             echo ">> Streaming to YouTube RTMP ($REMAINING seconds left in chunk)..."
             
-            ffmpeg -re -stream_loop -1 -i stream_video.mp4 \
+            ffmpeg -re -stream_loop -1 -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2 \
+              -i stream_video.mp4 \
               -t "$REMAINING" \
-              -map 0:v:0 -map 0:a:0? \
-              -c:v copy \
-              -c:a aac -b:a 192k -ar 48000 -ac 2 \
+              -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p" \
+              -c:v libx264 -preset veryfast -tune zerolatency \
+              -b:v 4500k -maxrate 5000k -bufsize 9000k \
+              -r 30 -g 60 -keyint_min 60 -sc_threshold 0 \
+              -c:a aac -b:a 160k -ar 44100 -ac 2 \
               -max_muxing_queue_size 4096 \
-              -fflags +genpts+discardcorrupt \
-              -avoid_negative_ts make_zero \
               -flvflags no_duration_filesize \
               -f flv \
               "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY" || true
 
-            # If user pressed cancel (SIGINT / SIGTERM), break immediately
             if [ $? -eq 130 ]; then
               break
             fi
@@ -93,15 +91,11 @@ jobs:
             sleep 2
           done
 
-          # Create a completion token ONLY if the full duration completed naturally
           if [ $(date +%s) -ge $END_TIME ]; then
             touch /tmp/stream_chunk_completed_normally
           fi
 
       - name: Trigger Next Relay Runner (Manual Stop Mode Only)
-        # 1. Must have succeeded without errors or cancellation.
-        # 2. Must be in Continuous Loop mode.
-        # 3. Must have verified normal completion token (guarantees no relay if manually cancelled).
         if: success() && github.event.inputs.stream_mode == 'Until Manually Stopped (Continuous Loop)'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
