@@ -99,28 +99,6 @@ jobs:
               --num-weeks "${{ github.event.inputs.num_weeks }}"
           fi
 
-      - name: Remux Broadcast Master MOV (12Mbps CBR + FastStart)
-        if: github.event.inputs.action_mode != 'Dry Run (Inspect Patterns Only)'
-        run: |
-          SRC_FILE=$(find . -maxdepth 3 -type f -name "kalyan_master_video.mp4" -o -name "*master*.mp4" | head -n 1)
-          if [ -z "$SRC_FILE" ]; then SRC_FILE="output/kalyan_master_video.mp4"; fi
-
-          if [ -f "$SRC_FILE" ]; then
-            mkdir -p output
-            ffmpeg -y -i "$SRC_FILE" \
-              -c:v libx264 -preset fast -profile:v main \
-              -b:v 12000k -minrate 12000k -maxrate 12000k -bufsize 12000k \
-              -x264-params "nal-hrd=cbr:force-cfr=1" \
-              -bf 1 -pix_fmt yuv420p \
-              -c:a aac -b:a 320k -ar 48000 \
-              -timecode "01:00:00:00" \
-              -movflags +faststart \
-              output/kalyan_master_video.mov
-          else
-            echo "::error::Source video MP4 not found!"
-            exit 1
-          fi
-
       - name: Publish Video to Private Repo Releases
         if: github.event.inputs.action_mode != 'Dry Run (Inspect Patterns Only)'
         env:
@@ -128,4 +106,11 @@ jobs:
         run: |
           SLUG="${{ secrets.CORE_REPO_SLUG }}"
           if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
-          gh release upload latest output/kalyan_master_video.mov --repo "$SLUG" --clobber
+
+          OUTPUT_FILE="output/kalyan_master_video.mp4"
+          if [ -f "$OUTPUT_FILE" ]; then
+            gh release upload latest "$OUTPUT_FILE" --repo "$SLUG" --clobber
+          else
+            echo "::error::Master video MP4 file not found!"
+            exit 1
+          fi
