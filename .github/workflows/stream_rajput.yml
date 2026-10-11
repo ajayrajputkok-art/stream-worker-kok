@@ -35,22 +35,7 @@ jobs:
           SLUG="${{ secrets.CORE_REPO_SLUG }}"
           if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
           echo "Downloading latest Rajput video from $SLUG..."
-          gh release download latest --repo "$SLUG" -p "kalyan_master_video.mp4" --output stream_video.mp4 --clobber
-
-      - name: Prepare Live-Safe Stream Video
-        run: |
-          # One-time offline conversion (not real-time): 1080p30, steady 6000k bitrate,
-          # keyframe every 2s, audio/video lengths matched. Makes the copy-stream below safe for YouTube.
-          ffmpeg -y -i stream_video.mp4 \
-            -vf "scale=1920:1080:flags=lanczos,fps=30,format=yuv420p" \
-            -c:v libx264 -preset veryfast -profile:v high \
-            -b:v 6000k -maxrate 6000k -bufsize 12000k \
-            -x264-params nal-hrd=cbr \
-            -g 60 -keyint_min 60 -sc_threshold 0 \
-            -af apad -c:a aac -b:a 128k -ar 44100 -ac 2 \
-            -shortest -movflags +faststart \
-            stream_ready.mp4
-          mv stream_ready.mp4 stream_video.mp4
+          gh release download latest --repo "$SLUG" -p "kalyan_master_video_1080p.mp4" --output stream_video.mp4 --clobber
 
       - name: Stream Indefinitely to YouTube RTMP
         env:
