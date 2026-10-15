@@ -15,18 +15,14 @@ on:
         description: 'Current week jodis (leave empty for Monday)'
         required: false
         default: ''
-      trick_1_id:
-        description: 'Match ID for Trick 1'
+      tricks:
+        description: 'Match IDs for Tricks (e.g. 0,1,2 or single 0)'
         required: false
-        default: '0'
-      trick_2_id:
-        description: 'Match ID for Trick 2'
-        required: false
-        default: ''
+        default: '0,1,2'
       quality:
         description: 'Render quality'
         required: true
-        default: '4K'
+        default: 'LOW'
         type: choice
         options:
           - LOW
@@ -34,11 +30,11 @@ on:
       pace:
         description: 'Pace multiplier'
         required: true
-        default: '1.45'
+        default: '1.0'
       num_weeks:
-        description: 'Number of recent weeks'
+        description: 'Number of recent weeks (6 hist + 1 cur = 7)'
         required: false
-        default: '6'
+        default: '7'
 
 jobs:
   render:
@@ -92,8 +88,7 @@ jobs:
             echo "Running Full Video Generation..."
             python rajput_render.py \
               --current-week "$CURRENT_WEEK_ARG" \
-              --t1 "${{ github.event.inputs.trick_1_id }}" \
-              --t2 "${{ github.event.inputs.trick_2_id }}" \
+              --tricks "${{ github.event.inputs.tricks }}" \
               --quality "${{ github.event.inputs.quality }}" \
               --pace "${{ github.event.inputs.pace }}" \
               --num-weeks "${{ github.event.inputs.num_weeks }}"
