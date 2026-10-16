@@ -18,7 +18,7 @@ on:
       tricks:
         description: 'Match IDs for Tricks (e.g. 0,1,2 or single 0)'
         required: false
-        default: '0,1,2'
+        default: '0'
       quality:
         description: 'Render quality'
         required: true
@@ -35,6 +35,18 @@ on:
         description: 'Number of recent weeks (6 hist + 1 cur = 7)'
         required: false
         default: '7'
+      product_title:
+        description: 'Affiliate Product Title (leave empty to skip promo)'
+        required: false
+        default: ''
+      product_image_url:
+        description: 'Product Image Direct URL (PNG/JPG, leave empty to use local product.png)'
+        required: false
+        default: ''
+      product_voiceover:
+        description: 'Custom Hindi Pitch for Product'
+        required: false
+        default: 'दोस्तों, अगर आप अपने दिमाग को तेज़ करने के लिए यह शानदार पज़ल मंगाना चाहते हैं, तो स्क्रीन पर दिए गए व्यू प्रोडक्ट्स बटन पर क्लिक करें। अभी स्पेशल डिस्काउंट चल रहा है, ज़रूर चेक करें!'
 
 jobs:
   render:
@@ -46,7 +58,7 @@ jobs:
       - name: Install System Dependencies & Fonts
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y ffmpeg libpango1.0-dev libcairo2-dev pkg-config fonts-noto-core fonts-indic
+          sudo apt-get install -y ffmpeg libpango1.0-dev libcairo2-dev pkg-config fonts-noto-core fonts-indic curl
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -67,7 +79,16 @@ jobs:
           cp temp_core/bg_music*.mp3 ./ || true
           cp temp_core/sfx_draw*.mp3 ./ || true
           cp temp_core/audio_cta*.mp3 ./ || true
+          cp temp_core/product.png ./ || true
           rm -rf temp_core
+
+      - name: Download Product Image if URL Provided
+        run: |
+          IMG_URL="${{ github.event.inputs.product_image_url }}"
+          if [ -n "$IMG_URL" ]; then
+            echo "Downloading product image from $IMG_URL..."
+            curl -L -s "$IMG_URL" -o product.png
+          fi
 
       - name: Install Python Dependencies
         run: |
@@ -91,7 +112,9 @@ jobs:
               --tricks "${{ github.event.inputs.tricks }}" \
               --quality "${{ github.event.inputs.quality }}" \
               --pace "${{ github.event.inputs.pace }}" \
-              --num-weeks "${{ github.event.inputs.num_weeks }}"
+              --num-weeks "${{ github.event.inputs.num_weeks }}" \
+              --product-title "${{ github.event.inputs.product_title }}" \
+              --product-voice "${{ github.event.inputs.product_voiceover }}"
           fi
 
       - name: Publish Video to Private Repo Releases
