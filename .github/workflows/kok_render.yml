@@ -15,14 +15,10 @@ on:
         description: 'Current week jodis (leave empty for Monday)'
         required: false
         default: ''
-      trick_1_id:
-        description: 'Match ID for Trick 1'
+      tricks:
+        description: 'Match IDs for Tricks (e.g. 0,1,2 or single 0)'
         required: false
         default: '0'
-      trick_2_id:
-        description: 'Match ID for Trick 2'
-        required: false
-        default: ''
       quality:
         description: 'Render quality'
         required: true
@@ -34,16 +30,27 @@ on:
       pace:
         description: 'Pace multiplier'
         required: true
-        default: '3.5'
+        default: '1.0'
       num_weeks:
-        description: 'Number of recent weeks'
+        description: 'Number of block weeks (6 historical + 1 current = 7)'
         required: false
-        default: '6'
+        default: '7'
+      product_title:
+        description: 'Affiliate Product Title (leave empty to skip promo)'
+        required: false
+        default: ''
+      product_image_url:
+        description: 'Product Image Direct URL (PNG/JPG, leave empty to use local product.png)'
+        required: false
+        default: ''
+      product_voiceover:
+        description: 'Custom Hindi Pitch for Product'
+        required: false
+        default: ''
 
 jobs:
   render:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
     permissions:
       contents: write
     steps:
@@ -53,38 +60,45 @@ jobs:
       - name: Install System Dependencies & Fonts
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y ffmpeg libpango1.0-dev libcairo2-dev pkg-config fonts-noto-core fonts-indic
+          sudo apt-get install -y ffmpeg libpango1.0-dev libcairo2-dev pkg-config fonts-noto-core fonts-indic curl
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Fetch CH2 Code & Assets from Private Core
+      - name: Fetch KOK Code & Assets from Private Core
         env:
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.PRIVATE_REPO_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           SLUG="${{ secrets.CORE_REPO_SLUG }}"
           if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
           echo "Cloning core scripts and assets from $SLUG..."
           git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${SLUG}.git" temp_core
-
           cp temp_core/kok_render.py ./ || true
           cp temp_core/*Kalyan*.xlsx ./ || true
           cp temp_core/bg_music*.mp3 ./ || true
           cp temp_core/sfx_draw*.mp3 ./ || true
-          cp temp_core/audio_cta*.mp3 ./ || true
+          cp temp_core/product.png ./ || true
           rm -rf temp_core
+
+      - name: Download Product Image if URL Provided
+        run: |
+          IMG_URL="${{ github.event.inputs.product_image_url }}"
+          if [ -n "$IMG_URL" ]; then
+            echo "Downloading product image from $IMG_URL..."
+            curl -L -s "$IMG_URL" -o product.png
+          fi
 
       - name: Install Python Dependencies
         run: |
           pip install --upgrade pip
           pip install pandas openpyxl numpy requests manim edge-tts
 
-      - name: Run CH2 Video Engine
+      - name: Run KOK Video Engine
         run: |
           CURRENT_WEEK_ARG="${{ github.event.inputs.current_week }}"
-
+          
           if [ "${{ github.event.inputs.action_mode }}" = "Dry Run (Inspect Patterns Only)" ]; then
             echo "Running Dry-Run to inspect pattern matches..."
             python kok_render.py \
@@ -95,40 +109,22 @@ jobs:
             echo "Running Full Video Generation..."
             python kok_render.py \
               --current-week "$CURRENT_WEEK_ARG" \
-              --t1 "${{ github.event.inputs.trick_1_id }}" \
-              --t2 "${{ github.event.inputs.trick_2_id }}" \
+              --tricks "${{ github.event.inputs.tricks }}" \
               --quality "${{ github.event.inputs.quality }}" \
               --pace "${{ github.event.inputs.pace }}" \
-              --num-weeks "${{ github.event.inputs.num_weeks }}"
+              --num-weeks "${{ github.event.inputs.num_weeks }}" \
+              --product-title "${{ github.event.inputs.product_title }}" \
+              --product-voice "${{ github.event.inputs.product_voiceover }}"
           fi
 
-      - name: Remux Broadcast Master MOV (12Mbps CBR + FastStart)
+      - name: Publish Video to Release
         if: github.event.inputs.action_mode != 'Dry Run (Inspect Patterns Only)'
-        run: |
-          SRC_FILE=$(find . -maxdepth 3 -type f -name "ch2_master_video.mp4" -o -name "*master*.mp4" | head -n 1)
-          if [ -z "$SRC_FILE" ]; then SRC_FILE="output/ch2_master_video.mp4"; fi
-
-          if [ -f "$SRC_FILE" ]; then
-            mkdir -p output
-            ffmpeg -y -i "$SRC_FILE" \
-              -c:v libx264 -preset fast -profile:v main \
-              -b:v 12000k -minrate 12000k -maxrate 12000k -bufsize 12000k \
-              -x264-params "nal-hrd=cbr:force-cfr=1" \
-              -bf 1 -pix_fmt yuv420p \
-              -c:a aac -b:a 320k -ar 48000 \
-              -timecode "01:00:00:00" \
-              -movflags +faststart \
-              output/kalyan_master_video_ch2.mov
-          else
-            echo "::error::Source video MP4 not found!"
-            exit 1
-          fi
-
-      - name: Publish Video to Private Repo Releases
-        if: github.event.inputs.action_mode != 'Dry Run (Inspect Patterns Only)'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-ch2
+          name: Latest CH2 Stream Video
+          files: |
+            output/ch2_master_video.mp4
+            output/kalyan_master_video_ch2_1080p.mp4
         env:
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
-        run: |
-          SLUG="${{ secrets.CORE_REPO_SLUG }}"
-          if [ -z "$SLUG" ]; then SLUG="ajayrajputkok-art/KOKStream"; fi
-          gh release upload latest-ch2 output/kalyan_master_video_ch2.mov --repo "$SLUG" --clobber
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
