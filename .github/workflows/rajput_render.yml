@@ -32,9 +32,9 @@ on:
         required: true
         default: '1.0'
       num_weeks:
-        description: 'Number of recent weeks (6 hist + 1 cur = 7)'
+        description: 'Number of recent weeks'
         required: false
-        default: '7'
+        default: '6'
       product_title:
         description: 'Affiliate Product Title (leave empty to skip promo)'
         required: false
@@ -46,13 +46,13 @@ on:
       product_voiceover:
         description: 'Custom Hindi Pitch for Product'
         required: false
-        default: 'दोस्तों, अगर आप अपने दिमाग को तेज़ करने के लिए यह शानदार पज़ल मंगाना चाहते हैं, तो स्क्रीन पर दिए गए व्यू प्रोडक्ट्स बटन पर क्लिक करें। अभी स्पेशल डिस्काउंट चल रहा है, ज़रूर चेक करें!'
+        default: ''
 
 jobs:
   render:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out public repo
+      - name: Check out repo
         uses: actions/checkout@v4
 
       - name: Install System Dependencies & Fonts
@@ -93,7 +93,7 @@ jobs:
       - name: Install Python Dependencies
         run: |
           pip install --upgrade pip
-          pip install pandas openpyxl numpy requests manim edge-tts
+          pip install --upgrade pandas openpyxl numpy requests manim edge-tts gTTS
 
       - name: Run Rajput Video Engine
         run: |
