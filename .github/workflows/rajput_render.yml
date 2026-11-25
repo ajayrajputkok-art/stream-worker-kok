@@ -27,8 +27,16 @@ on:
         options:
           - LOW
           - 4K
+      audio_mode:
+        description: 'Audio Mode (voiceover or music)'
+        required: true
+        default: 'voiceover'
+        type: choice
+        options:
+          - voiceover
+          - music
       pace:
-        description: 'Pace multiplier'
+        description: 'Pace multiplier (used for video speed/length, e.g. 0.7 fast, 1.0 normal, 1.8 slow)'
         required: true
         default: '1.0'
       num_weeks:
@@ -112,6 +120,7 @@ jobs:
               --tricks "${{ github.event.inputs.tricks }}" \
               --quality "${{ github.event.inputs.quality }}" \
               --pace "${{ github.event.inputs.pace }}" \
+              --audio-mode "${{ github.event.inputs.audio_mode }}" \
               --num-weeks "${{ github.event.inputs.num_weeks }}" \
               --product-title "${{ github.event.inputs.product_title }}" \
               --product-voice "${{ github.event.inputs.product_voiceover }}"
