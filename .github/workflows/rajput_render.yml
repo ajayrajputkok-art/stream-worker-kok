@@ -87,6 +87,7 @@ jobs:
           cp temp_core/bg_music*.mp3 ./ || true
           cp temp_core/sfx_draw*.mp3 ./ || true
           cp temp_core/audio_cta*.mp3 ./ || true
+          cp "temp_core/membership amit gupta.mp3" ./ || true
           cp temp_core/product.png ./ || true
           rm -rf temp_core
 
