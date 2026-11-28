@@ -26,6 +26,7 @@ on:
         type: choice
         options:
           - LOW
+          - 1080P
           - 4K
       audio_mode:
         description: 'Audio Mode (voiceover or music)'
